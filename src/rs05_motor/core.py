@@ -15,15 +15,15 @@ class RS05Motor:
         logging.info("Inisialisasi handshake port selesai.")
 
     def _execute_and_log(self, action_name: str, frame: bytes,
-                          read_reply: bool = False, verbose: bool = False) -> bytes:
-        if verbose:
-            print(f"\n[{action_name}]")
-            print(f"  TxHex: \"{frame.hex()}\"")
+                          read_reply: bool = True, verbose: bool = True) -> bytes:
+        # if verbose:
+            # print(f"\n[{action_name}]")
+            # print(f"  TxHex: \"{frame.hex()}\"")
 
         rx_bytes = self.transport.send_frame(frame, read_reply=read_reply)
 
-        if verbose:
-            print(f"  RxHex: \"{rx_bytes.hex() if rx_bytes else 'No Response/Timeout'}\"")
+        # if verbose:
+        #     print(f"  RxHex: \"{rx_bytes.hex() if rx_bytes else 'No Response/Timeout'}\"")
         return rx_bytes
 
     def enable(self, motor_id: int):
@@ -64,11 +64,11 @@ class RS05Motor:
 
     def read_joints(self, motor_id: int) -> float:
             payload = bytes(8)
-            frame = build_at_frame(COMM_TYPE_STOP, DEFAULT_HOST_ID, motor_id, payload)
+            frame = build_at_frame(COMM_TYPE_ENABLE, DEFAULT_HOST_ID, motor_id, payload)
             rx_bytes = self._execute_and_log("READ_JOINTS_TRIGGER", frame)
 
             if not rx_bytes or len(rx_bytes) < 17:
-                logging.warning("Respons tidak lengkap/timeout saat read_joints, kembalikan 0.0 rad.")
+                # logging.warning("Respons tidak lengkap/timeout saat read_joints, kembalikan 0.0 rad.")
                 return 0.0
 
             data_field = rx_bytes[7:15]
@@ -79,13 +79,13 @@ class RS05Motor:
     def check_joints(self, motor_id: int) -> float:
         """Baca dan cetak posisi motor saat ini secara instan (untuk monitoring)."""
         angle_rad = self.read_joints(motor_id)
-        print(f"[CHECK_JOINTS] Motor ID {motor_id} -> Posisi saat ini: {angle_rad:.4f} rad")
+        # print(f"[CHECK_JOINTS] Motor ID {motor_id} -> Posisi saat ini: {angle_rad:.4f} rad")
         return angle_rad
 
     def save_motion(self, name: str, angle_rad: float):
         """Simpan posisi (rad) ke memori gerakan dengan key nama gerakan."""
         self.saved_motions[name] = angle_rad
-        logging.info(f"Gerakan '{name}' disimpan pada posisi {angle_rad:.4f} rad")
+        # logging.info(f"Gerakan '{name}' disimpan pada posisi {angle_rad:.4f} rad")
 
     def play_motion(self, motor_id: int, name: str, kp: float, kd: float):
         """Mainkan ulang gerakan yang sudah disimpan sebelumnya via save_motion."""

@@ -16,7 +16,7 @@ class SerialTransport:
         """Kirim bytes perintah lewat serial dan baca balasannya jika ada."""
         self.ser.write(frame)
         if read_reply:
-            time.sleep(0.01)
+            # time.sleep(0.01)
             return self.ser.read(64)
         return b""
 
