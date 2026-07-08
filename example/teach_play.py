@@ -23,7 +23,7 @@ if __name__ == "__main__":
         time.sleep(1.5)
 
         print("Membaca posisi aktual (read_joints/check_joints)...")
-        posisi_terekam = motor.check_joints(MOTOR_ID)
+        posisi_terekam = motor.check_position(MOTOR_ID)
 
         motor.save_motion("gerak pertama", posisi_terekam)
 
