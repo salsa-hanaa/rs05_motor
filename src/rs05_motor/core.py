@@ -14,18 +14,16 @@ class RS05Motor:
         self.saved_motions = {}
         logging.info("Inisialisasi handshake port selesai.")
 
-    def _execute_and_log(self, action_name: str, frame: bytes) -> bytes:
-        tx_hex = frame.hex()
-        print(f"\n[{action_name}]")
-        print(f"  TxHex: \"{tx_hex}\"")
+    def _execute_and_log(self, action_name: str, frame: bytes,
+                          read_reply: bool = False, verbose: bool = False) -> bytes:
+        if verbose:
+            print(f"\n[{action_name}]")
+            print(f"  TxHex: \"{frame.hex()}\"")
 
-        rx_bytes = self.transport.send_frame(frame, read_reply=True)
+        rx_bytes = self.transport.send_frame(frame, read_reply=read_reply)
 
-        if rx_bytes:
-            rx_hex = rx_bytes.hex()
-            print(f"  RxHex: \"{rx_hex}\"")
-        else:
-            print("  RxHex: \"No Response/Timeout\"")
+        if verbose:
+            print(f"  RxHex: \"{rx_bytes.hex() if rx_bytes else 'No Response/Timeout'}\"")
         return rx_bytes
 
     def enable(self, motor_id: int):
@@ -42,9 +40,9 @@ class RS05Motor:
 
     def move_gripper(self, motor_id: int, angle_rad: float, kp: float, kd: float,
                      velocity: float = 0.0, torque: float = 0.0):
-        logging.info(
-            f"Kirim Perintah Gerak -> ID: {motor_id} | Target Angle: {angle_rad:.2f} rad "
-            f"| Kp: {kp:.1f} | Kd: {kd:.1f} | Target Vel: {velocity:.1f} | Torque FF: {torque:.1f}"
+        logging.debug(
+            "Kirim Perintah Gerak -> ID: %d | Angle: %.2f | Kp: %.1f | Kd: %.1f",
+            motor_id, angle_rad, kp, kd
         )
 
         pos_raw = float_to_uint16(angle_rad, *POS_RANGE)
@@ -61,7 +59,8 @@ class RS05Motor:
         )
 
         frame = build_at_frame(COMM_TYPE_MOTION, torque_raw, motor_id, payload)
-        return self._execute_and_log("MOTION_CONTROL", frame)
+        return self._execute_and_log("MOTION_CONTROL", frame, read_reply=False, verbose=False)
+
 
     def read_joints(self, motor_id: int) -> float:
             payload = bytes(8)
