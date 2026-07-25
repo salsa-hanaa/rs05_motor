@@ -1,10 +1,15 @@
 import logging
+import time
 from .communicate import SerialTransport
 from .conversion import (
     float_to_uint16, uint16_to_float,
     POS_RANGE, VEL_RANGE, KP_RANGE, KD_RANGE, TORQUE_RANGE
 )
-from .bit_convert import build_at_frame, COMM_TYPE_ENABLE, COMM_TYPE_STOP, COMM_TYPE_MOTION, DEFAULT_HOST_ID
+from .bit_convert import (
+    build_at_frame, decode_can_id,
+    COMM_TYPE_ENABLE, COMM_TYPE_STOP, COMM_TYPE_MOTION, COMM_TYPE_SET_ZERO,
+    DEFAULT_HOST_ID
+)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class RS05Motor:
@@ -38,6 +43,36 @@ class RS05Motor:
         logging.info(f"Mengirim perintah STOP ke Motor ID: {motor_id}")
         return self._execute_and_log("STOP_MOTOR", frame)
 
+    def set_zero(self, motor_id: int) -> bool:
+        """Set posisi joint saat ini sebagai mechanical zero (joint -> 0) pada Motor ID tertentu."""
+        payload = bytes([1, 0, 0, 0, 0, 0, 0, 0])
+        frame = build_at_frame(COMM_TYPE_SET_ZERO, DEFAULT_HOST_ID, motor_id, payload)
+        logging.info(f"Mengirim perintah SET ZERO (mechanical zero) ke Motor ID: {motor_id}")
+        rx_bytes = self._execute_and_log("SET_ZERO_POSITION", frame)
+
+        if not rx_bytes or len(rx_bytes) < 17:
+            logging.warning(f"Tidak ada respons saat set_zero Motor ID {motor_id}.")
+            return False
+
+        _, data_area, _ = decode_can_id(rx_bytes[2:6])
+        success = data_area == motor_id
+        if success:
+            logging.info(f"Set the mechanical zero position successfully! Motor ID: {motor_id}")
+        else:
+            logging.warning(f"Respons set_zero Motor ID {motor_id} tidak sesuai (gagal diverifikasi).")
+        return success
+
+    def set_zero_multi(self, motor_ids: list, delay: float = 0.2) -> dict:
+        """Set mechanical zero untuk beberapa Motor ID secara bergilir lewat satu bus CAN yang sama."""
+        hasil = {}
+        for motor_id in motor_ids:
+            logging.info(f"--- Proses set_zero Motor ID {motor_id} ---")
+            self.stop(motor_id)
+            time.sleep(delay)
+            hasil[motor_id] = self.set_zero(motor_id)
+            time.sleep(delay)
+        return hasil
+
     def move_gripper(self, motor_id: int, angle_rad: float, kp: float, kd: float,
                      velocity: float = 0.0, torque: float = 0.0):
         logging.debug(
@@ -60,6 +95,31 @@ class RS05Motor:
 
         frame = build_at_frame(COMM_TYPE_MOTION, torque_raw, motor_id, payload)
         return self._execute_and_log("MOTION_CONTROL", frame, read_reply=False, verbose=False)
+
+    def move_multi(self, commands: list):
+        """Gerakkan beberapa motor 'bersamaan' dengan menggabungkan semua frame jadi
+        satu write() serial, bukan loop kirim-satu-satu (yang punya jeda antar motor).
+        commands: list of dict {motor_id, angle_rad, kp, kd, velocity=0.0, torque=0.0}
+        """
+        combined = bytearray()
+        for cmd in commands:
+            pos_raw = float_to_uint16(cmd["angle_rad"], *POS_RANGE)
+            vel_raw = float_to_uint16(cmd.get("velocity", 0.0), *VEL_RANGE)
+            kp_raw  = float_to_uint16(cmd["kp"], *KP_RANGE)
+            kd_raw  = float_to_uint16(cmd["kd"], *KD_RANGE)
+            torque_raw = float_to_uint16(cmd.get("torque", 0.0), *TORQUE_RANGE)
+
+            payload = (
+                pos_raw.to_bytes(2, "big") +
+                vel_raw.to_bytes(2, "big") +
+                kp_raw.to_bytes(2, "big") +
+                kd_raw.to_bytes(2, "big")
+            )
+            combined += build_at_frame(COMM_TYPE_MOTION, torque_raw, cmd["motor_id"], payload)
+
+        motor_ids = [cmd["motor_id"] for cmd in commands]
+        logging.info(f"Mengirim MOTION_CONTROL serentak (1x write) ke Motor ID: {motor_ids}")
+        return self._execute_and_log("MOTION_CONTROL_MULTI", bytes(combined), read_reply=False, verbose=False)
 
 
     def read_joints(self, motor_id: int) -> float:
