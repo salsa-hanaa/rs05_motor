@@ -1,5 +1,6 @@
 import logging
 import time
+from typing import Optional
 from .communicate import SerialTransport
 from .conversion import (
     float_to_uint16, uint16_to_float,
@@ -21,14 +22,7 @@ class RS05Motor:
 
     def _execute_and_log(self, action_name: str, frame: bytes,
                           read_reply: bool = True, verbose: bool = True) -> bytes:
-        # if verbose:
-            # print(f"\n[{action_name}]")
-            # print(f"  TxHex: \"{frame.hex()}\"")
-
         rx_bytes = self.transport.send_frame(frame, read_reply=read_reply)
-
-        # if verbose:
-        #     print(f"  RxHex: \"{rx_bytes.hex() if rx_bytes else 'No Response/Timeout'}\"")
         return rx_bytes
 
     def enable(self, motor_id: int):
@@ -121,31 +115,43 @@ class RS05Motor:
         logging.info(f"Mengirim MOTION_CONTROL serentak (1x write) ke Motor ID: {motor_ids}")
         return self._execute_and_log("MOTION_CONTROL_MULTI", bytes(combined), read_reply=False, verbose=False)
 
+    def read_joints(self, motor_id: int) -> Optional[float]:
+        """Baca posisi motor. Mengembalikan None (bukan 0.0) kalau gagal atau
+        kalau balasan ternyata bukan milik motor_id ini -- supaya caller bisa
+        membedakan 'gagal baca' dari 'posisi memang 0.0'.
+        """
+        payload = bytes(8)
+        frame = build_at_frame(COMM_TYPE_ENABLE, DEFAULT_HOST_ID, motor_id, payload)
+        rx_bytes = self._execute_and_log("READ_JOINTS_TRIGGER", frame)
 
-    def read_joints(self, motor_id: int) -> float:
-            payload = bytes(8)
-            frame = build_at_frame(COMM_TYPE_ENABLE, DEFAULT_HOST_ID, motor_id, payload)
-            rx_bytes = self._execute_and_log("READ_JOINTS_TRIGGER", frame)
+        if not rx_bytes or len(rx_bytes) < 17:
+            logging.warning(f"read_joints: tidak ada/kurang respons dari Motor ID {motor_id}.")
+            return None
 
-            if not rx_bytes or len(rx_bytes) < 17:
-                # logging.warning("Respons tidak lengkap/timeout saat read_joints, kembalikan 0.0 rad.")
-                return 0.0
+        _, data_area, _ = decode_can_id(rx_bytes[2:6])
+        if data_area != motor_id:
+            logging.warning(
+                f"read_joints: respons milik Motor ID {data_area}, diharapkan {motor_id}. Diabaikan."
+            )
+            return None
 
-            data_field = rx_bytes[7:15]
-            pos_raw = int.from_bytes(data_field[0:2], "big")
-            angle_rad = uint16_to_float(pos_raw, *POS_RANGE)
-            return angle_rad
+        data_field = rx_bytes[7:15]
+        pos_raw = int.from_bytes(data_field[0:2], "big")
+        angle_rad = uint16_to_float(pos_raw, *POS_RANGE)
+        return angle_rad
 
-    def check_joints(self, motor_id: int) -> float:
+    def check_joints(self, motor_id: int):
         """Baca dan cetak posisi motor saat ini secara instan (untuk monitoring)."""
         angle_rad = self.read_joints(motor_id)
-        # print(f"[CHECK_JOINTS] Motor ID {motor_id} -> Posisi saat ini: {angle_rad:.4f} rad")
+        if angle_rad is None:
+            print(f"[CHECK_JOINTS] Motor ID {motor_id} -> Gagal membaca posisi.")
+        else:
+            print(f"[CHECK_JOINTS] Motor ID {motor_id} -> Posisi saat ini: {angle_rad:.4f} rad")
         return angle_rad
 
     def save_motion(self, name: str, angle_rad: float):
         """Simpan posisi (rad) ke memori gerakan dengan key nama gerakan."""
         self.saved_motions[name] = angle_rad
-        # logging.info(f"Gerakan '{name}' disimpan pada posisi {angle_rad:.4f} rad")
 
     def play_motion(self, motor_id: int, name: str, kp: float, kd: float):
         """Mainkan ulang gerakan yang sudah disimpan sebelumnya via save_motion."""

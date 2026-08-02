@@ -1,6 +1,7 @@
 import serial
 import time
 
+
 class SerialTransport:
     def __init__(self, port: str, baudrate: int = 921600, timeout: float = 0.2):
         self.ser = serial.Serial(port, baudrate=baudrate, timeout=timeout)
@@ -13,10 +14,20 @@ class SerialTransport:
         return self.ser.read(64)
 
     def send_frame(self, frame: bytes, read_reply: bool = True) -> bytes:
-        """Kirim bytes perintah lewat serial dan baca balasannya jika ada."""
+        """Kirim bytes perintah lewat serial dan baca balasannya jika ada.
+
+        Always discard whatever is sitting in the input buffer BEFORE sending
+        a new frame. This matters because some frames (e.g. MOTION_CONTROL
+        sent with read_reply=False) can still trigger a reply from the motor
+        that is never consumed. If left there, that stale reply gets read by
+        the NEXT send_frame() call (e.g. read_joints) and gets parsed as if
+        it were that call's own response, producing a garbage/misaligned
+        position reading.
+        """
+        self.ser.reset_input_buffer()
         self.ser.write(frame)
+
         if read_reply:
-            # time.sleep(0.01)
             return self.ser.read(64)
         return b""
 
